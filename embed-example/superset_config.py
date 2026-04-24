@@ -8,57 +8,49 @@
 #
 #   http://www.apache.org/licenses/LICENSE-2.0
 #
-# Unless required by applicable law or agreed to in writing,
-# software distributed under the License is distributed on an
-# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-# KIND, either express or implied.  See the License for the
-# specific language governing permissions and limitations
-# under the License.
-#
-# This file is included in the final Docker image and SHOULD be overridden when
-# deploying the image to prod. Settings configured here are intended for use in local
-# development environments. Also note that superset_config_docker.py is imported
-# as a final step as a means to override "defaults" configured here
-#
 import logging
 import os
+import re
 import sys
 
-from flask import g
 from celery.schedules import crontab
 from flask_caching.backends.filesystemcache import FileSystemCache
 
 logger = logging.getLogger()
 
-DATABASE_DIALECT = os.getenv("DATABASE_DIALECT")
-DATABASE_USER = os.getenv("DATABASE_USER")
+# ============================================================
+# DATABASE CONNECTION
+# ============================================================
+DATABASE_DIALECT  = os.getenv("DATABASE_DIALECT")
+DATABASE_USER     = os.getenv("DATABASE_USER")
 DATABASE_PASSWORD = os.getenv("DATABASE_PASSWORD")
-DATABASE_HOST = os.getenv("DATABASE_HOST")
-DATABASE_PORT = os.getenv("DATABASE_PORT")
-DATABASE_DB = os.getenv("DATABASE_DB")
+DATABASE_HOST     = os.getenv("DATABASE_HOST")
+DATABASE_PORT     = os.getenv("DATABASE_PORT")
+DATABASE_DB       = os.getenv("DATABASE_DB")
 
-EXAMPLES_USER = os.getenv("EXAMPLES_USER")
+EXAMPLES_USER     = os.getenv("EXAMPLES_USER")
 EXAMPLES_PASSWORD = os.getenv("EXAMPLES_PASSWORD")
-EXAMPLES_HOST = os.getenv("EXAMPLES_HOST")
-EXAMPLES_PORT = os.getenv("EXAMPLES_PORT")
-EXAMPLES_DB = os.getenv("EXAMPLES_DB")
+EXAMPLES_HOST     = os.getenv("EXAMPLES_HOST")
+EXAMPLES_PORT     = os.getenv("EXAMPLES_PORT")
+EXAMPLES_DB       = os.getenv("EXAMPLES_DB")
 
-# The SQLAlchemy connection string.
 SQLALCHEMY_DATABASE_URI = (
     f"{DATABASE_DIALECT}://"
     f"{DATABASE_USER}:{DATABASE_PASSWORD}@"
     f"{DATABASE_HOST}:{DATABASE_PORT}/{DATABASE_DB}"
 )
-
 SQLALCHEMY_EXAMPLES_URI = (
     f"{DATABASE_DIALECT}://"
     f"{EXAMPLES_USER}:{EXAMPLES_PASSWORD}@"
     f"{EXAMPLES_HOST}:{EXAMPLES_PORT}/{EXAMPLES_DB}"
 )
 
-REDIS_HOST = os.getenv("REDIS_HOST", "redis")
-REDIS_PORT = os.getenv("REDIS_PORT", "6379")
-REDIS_CELERY_DB = os.getenv("REDIS_CELERY_DB", "0")
+# ============================================================
+# REDIS / CELERY / CACHE
+# ============================================================
+REDIS_HOST       = os.getenv("REDIS_HOST", "redis")
+REDIS_PORT       = os.getenv("REDIS_PORT", "6379")
+REDIS_CELERY_DB  = os.getenv("REDIS_CELERY_DB", "0")
 REDIS_RESULTS_DB = os.getenv("REDIS_RESULTS_DB", "1")
 
 RESULTS_BACKEND = FileSystemCache("/app/superset_home/sqllab")
@@ -71,22 +63,22 @@ CACHE_CONFIG = {
     "CACHE_REDIS_PORT": REDIS_PORT,
     "CACHE_REDIS_DB": REDIS_RESULTS_DB,
 }
-DATA_CACHE_CONFIG = CACHE_CONFIG
+DATA_CACHE_CONFIG      = CACHE_CONFIG
 THUMBNAIL_CACHE_CONFIG = CACHE_CONFIG
 
 
 class CeleryConfig:
-    broker_url = f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_CELERY_DB}"
-    imports = (
+    broker_url  = f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_CELERY_DB}"
+    imports     = (
         "superset.sql_lab",
         "superset.tasks.scheduler",
         "superset.tasks.thumbnails",
         "superset.tasks.cache",
     )
-    result_backend = f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_RESULTS_DB}"
+    result_backend             = f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_RESULTS_DB}"
     worker_prefetch_multiplier = 1
-    task_acks_late = False
-    beat_schedule = {
+    task_acks_late             = False
+    beat_schedule              = {
         "reports.scheduler": {
             "task": "reports.scheduler",
             "schedule": crontab(minute="*", hour="*"),
@@ -100,10 +92,10 @@ class CeleryConfig:
 
 CELERY_CONFIG = CeleryConfig
 
-FEATURE_FLAGS = {"ALERT_REPORTS": True}
 ALERT_REPORTS_NOTIFICATION_DRY_RUN = True
-WEBDRIVER_BASEURL = f"http://superset_app{os.environ.get('SUPERSET_APP_ROOT', '/')}/"  # When using docker compose baseurl should be http://superset_nginx{ENV{BASEPATH}}/  # noqa: E501
-# The base URL for the email report hyperlinks.
+WEBDRIVER_BASEURL = (
+    f"http://superset_app{os.environ.get('SUPERSET_APP_ROOT', '/')}/"
+)
 WEBDRIVER_BASEURL_USER_FRIENDLY = (
     f"http://localhost:8888/{os.environ.get('SUPERSET_APP_ROOT', '/')}/"
 )
@@ -113,171 +105,172 @@ log_level_text = os.getenv("SUPERSET_LOG_LEVEL", "INFO")
 LOG_LEVEL = getattr(logging, log_level_text.upper(), logging.INFO)
 
 if os.getenv("CYPRESS_CONFIG") == "true":
-    # When running the service as a cypress backend, we need to import the config
-    # located @ tests/integration_tests/superset_test_config.py
-    base_dir = os.path.dirname(__file__)
+    base_dir      = os.path.dirname(__file__)
     module_folder = os.path.abspath(
         os.path.join(base_dir, "../../tests/integration_tests/")
     )
     sys.path.insert(0, module_folder)
     from superset_test_config import *  # noqa
-
     sys.path.pop(0)
 
-#
-# Optionally import superset_config_docker.py (which will have been included on
-# the PYTHONPATH) in order to allow for local settings to be overridden
-#
 try:
     import superset_config_docker
     from superset_config_docker import *  # noqa: F403
-
-    logger.info(
-        f"Loaded your Docker configuration at [{superset_config_docker.__file__}]"
-    )
+    logger.info(f"Loaded Docker config at [{superset_config_docker.__file__}]")
 except ImportError:
     logger.info("Using default Docker config...")
 
-def get_fossil_context(target_key):
-    """
-    Parses the username and returns the value for a specific key.
-    Usage in SQL: {{ get_fossil_context('tenant') }}
-    """
-    from flask import g
 
-    try:
-        # Check if user exists and has a username
-        if g.user and hasattr(g.user, 'username') and g.user.username:
-            parts = g.user.username.split(':')
-
-            # Loop through pairs (e.g., tenant:KAJ:subtenant:BEKASI)
-            for i in range(0, len(parts), 2):
-                if i + 1 < len(parts):
-                    key = parts[i].lower()
-                    val = parts[i+1]
-
-                    if key == target_key.lower():
-                        return val
-    except Exception:
-        pass
-
-    return "NULL"
-
-# Register the function inside a dictionary!
-JINJA_CONTEXT_ADDONS = {
-    "get_fossil_context": get_fossil_context
-}
-
+# ============================================================
+# FEATURE FLAGS
+# ============================================================
 FEATURE_FLAGS = {
     "ALERT_REPORTS": True,
     "ENABLE_TEMPLATE_PROCESSING": True,
     "EMBEDDED_SUPERSET": True,
 }
 
+# ============================================================
+# GUEST TOKEN
+# ============================================================
+GUEST_ROLE_NAME             = "Gamma"
+GUEST_TOKEN_JWT_SECRET      = "fossil-super-secret-jwt-key"
+GUEST_TOKEN_JWT_ALGO        = "HS256"
+GUEST_TOKEN_HEADER_NAME     = "X-GuestToken"
+GUEST_TOKEN_JWT_EXP_SECONDS = 86400
+
+# ============================================================
+# CORS
+# ============================================================
 ENABLE_CORS = True
 CORS_OPTIONS = {
     "supports_credentials": True,
     "allow_headers": ["*"],
     "expose_headers": ["*"],
     "resources": ["*"],
-    "origins": ["*"] # You can restrict this to your specific frontend URL later (e.g., "http://localhost:3000")
+    "origins": ["*"],  # Restrict to your frontend URL in production
 }
 
-# 3. Guest Token Configuration (Required for the Go backend to generate tickets)
-GUEST_ROLE_NAME = "Gamma" # Make sure the Gamma role has access to the database in Superset UI
-GUEST_TOKEN_JWT_SECRET = "fossil-super-secret-jwt-key" # Your Go backend will need this if it verifies the token, though Superset handles it natively
-GUEST_TOKEN_JWT_ALGO = "HS256"
-GUEST_TOKEN_HEADER_NAME = "X-GuestToken"
-GUEST_TOKEN_JWT_EXP_SECONDS = 300 # Token expires in 5 minutes
-
-
-# ==========================================
-# IFRAME & BROWSER SECURITY OVERRIDES
-# ==========================================
-# 1. Disable strict Talisman security for iframe embedding
+# ============================================================
+# IFRAME / BROWSER SECURITY (development)
+# ============================================================
 TALISMAN_ENABLED = False
+OVERRIDE_HTTP_HEADERS = {"X-Frame-Options": "ALLOWALL"}
 
-# 2. Tell the browser it's okay to render Superset in an iframe
-OVERRIDE_HTTP_HEADERS = {
-    "X-Frame-Options": "ALLOWALL",
-}
 
-# 3. Bulletproof Flask hook to force the headers on every request
 def _apply_dev_headers(app):
     @app.after_request
     def _add_headers(response):
-        # Removes the restrictive SAMEORIGIN header
-        response.headers["X-Frame-Options"] = "ALLOWALL"
-
-        # Allows cross-origin framing
+        response.headers["X-Frame-Options"]         = "ALLOWALL"
         response.headers["Content-Security-Policy"] = "frame-ancestors 'self' *"
         return response
+
 
 FLASK_APP_MUTATOR = lambda app: _apply_dev_headers(app)
 
 
-
-
-
-###################
-# ==========================================
-# POSTGRESQL NATIVE RLS ACTIVATION (THE FINAL ARCHITECTURE)
-# ==========================================
-from sqlalchemy import event
-from sqlalchemy.engine import Engine
-import logging
-import os
-
-@event.listens_for(Engine, "checkout")
-def set_fossil_rls_on_checkout(dbapi_connection, connection_record, connection_proxy):
-    if 'psycopg' not in type(dbapi_connection).__module__:
-        return
-
+# ============================================================
+# JINJA CONTEXT — {{ get_fossil_context('tenant') }} in SQL
+# ============================================================
+def get_fossil_context(target_key):
+    """
+    Reads the structured username and returns the value for a key.
+    Username format: "role:subtenant:tenant:KAJ:subtenant:BEKASIUTARA"
+    Usage in Superset SQL: {{ get_fossil_context('tenant') }}
+    """
+    from flask import g
     try:
-        dsn = dbapi_connection.get_dsn_parameters()
-        metadata_db = os.getenv("DATABASE_DB", "superset")
-        if dsn.get('dbname') == metadata_db:
-            return
+        username = getattr(getattr(g, "user", None), "username", None)
+        if username:
+            parts = username.split(":")
+            for i in range(0, len(parts) - 1, 2):
+                if parts[i].lower() == target_key.lower():
+                    return parts[i + 1]
     except Exception:
         pass
+    return "NULL"
 
-    from flask import has_app_context, g
-    cursor = None
 
-    try:
-        if has_app_context() and g and hasattr(g, 'user') and getattr(g.user, 'username', None):
-            web_user = g.user.username
+JINJA_CONTEXT_ADDONS = {
+    "get_fossil_context": get_fossil_context,
+}
 
-            if "tenant:" in web_user:
-                parts = web_user.split(':')
-                fossil_tenant = "NULL"
-                fossil_subtenant = "NULL"
 
-                for i in range(0, len(parts), 2):
-                    if i + 1 < len(parts):
-                        key = parts[i].lower()
-                        val = parts[i+1]
-                        if key == 'tenant': fossil_tenant = val
-                        elif key == 'subtenant': fossil_subtenant = val
+# ============================================================
+# POSTGRESQL NATIVE RLS
+# ============================================================
+# We use DB_CONNECTION_MUTATOR to inject a psycopg2 connection_factory
+# that runs set_config() immediately after every new connection is made.
+# This is the only reliable way to set custom GUC parameters in Supabase.
 
-                if fossil_tenant != "NULL":
-                    cursor = dbapi_connection.cursor()
+from flask import g as flask_g
+import psycopg2
+import psycopg2.extensions
+import re
 
-                    cursor.execute("SET LOCAL role authenticated;")
+_SAFE_VALUE = re.compile(r'^[A-Za-z0-9_\-]+$')
 
-                    if fossil_subtenant != "NULL":
-                        cursor.execute("SELECT set_config('app.current_role', 'subtenant', true);")
-                        cursor.execute(f"SELECT set_config('app.current_tenant', '{fossil_tenant}', true);")
-                        cursor.execute(f"SELECT set_config('app.current_subtenant', '{fossil_subtenant}', true);")
-                    else:
-                        cursor.execute("SELECT set_config('app.current_role', 'tenant', true);")
-                        cursor.execute(f"SELECT set_config('app.current_tenant', '{fossil_tenant}', true);")
 
-                    logging.info(f"FOSSIL NATIVE RLS: Secured connection for {web_user}")
-                    return
+def _safe(val):
+    return val if (val and _SAFE_VALUE.match(str(val))) else ""
 
-    except Exception as e:
-        logging.error(f"FOSSIL Checkout Error: {e}")
-    finally:
-        if cursor:
-            cursor.close()
+
+class FossilRLSConnection(psycopg2.extensions.connection):
+    """
+    Custom psycopg2 connection that injects RLS context before every query.
+    Uses Flask's request ID to detect when the request changes, so it
+    re-injects on every new request even on a pooled connection.
+    """
+    def cursor(self, *args, **kwargs):
+        cur = super().cursor(*args, **kwargs)
+
+        try:
+            from flask import has_app_context, g, request
+            if not has_app_context():
+                return cur
+
+            # Use the Flask request object's identity as a per-request key.
+            # When a new HTTP request comes in, request object changes
+            # → we re-inject the RLS context for that new request.
+            current_request_id = id(request)
+            if getattr(self, '_last_request_id', None) == current_request_id:
+                return cur  # Same request, already injected
+
+            self._last_request_id = current_request_id
+
+            username = getattr(getattr(g, "user", None), "username", None)
+            if username and "role:" in username:
+                parts = username.split(":")
+                ctx = {}
+                for i in range(0, len(parts) - 1, 2):
+                    ctx[parts[i].lower()] = parts[i + 1]
+
+                role_type  = _safe(ctx.get("role", ""))
+                tenant     = _safe(ctx.get("tenant", ""))
+                subtenant  = _safe(ctx.get("subtenant", ""))
+                donor_code = _safe(ctx.get("donor", ""))
+
+                if role_type:
+                    cur.execute("SELECT set_config('app.current_role',      %s, false)", (role_type,))
+                    cur.execute("SELECT set_config('app.current_tenant',    %s, false)", (tenant,))
+                    cur.execute("SELECT set_config('app.current_subtenant', %s, false)", (subtenant,))
+                    cur.execute("SELECT set_config('app.current_donor',     %s, false)", (donor_code,))
+                    logging.warning(f"FOSSIL RLS SET: role={role_type!r} tenant={tenant!r} subtenant={subtenant!r}")
+
+        except Exception as exc:
+            logging.error(f"FOSSIL RLS connection factory error: {exc}")
+
+        return cur
+
+def DB_CONNECTION_MUTATOR(url, params, headers, username, source=None):
+    host = url.host or ""
+    if "supabase" not in host and "pooler" not in host:
+        return url, params
+
+    # Inject our custom connection factory
+    connect_args = params.get("connect_args", {})
+    connect_args["connection_factory"] = FossilRLSConnection
+    params["connect_args"] = connect_args
+
+    logging.warning(f"FOSSIL MUTATOR: injecting RLS connection factory for host={host!r}")
+    return url, params

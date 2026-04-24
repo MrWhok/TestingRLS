@@ -1,4 +1,9 @@
-import SupersetEmbed from "../components/SupersetEmbed";
+import dynamic from "next/dynamic";
+
+const SupersetEmbed = dynamic(
+  () => import("../components/SupersetEmbed"),
+  { ssr: false }
+);
 
 export default function Home() {
   return (
